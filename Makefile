@@ -101,6 +101,18 @@ ifndef USE_OPENAL_DLOPEN
 USE_OPENAL_DLOPEN=0
 endif
 
+ifndef USE_CURL
+USE_CURL=1
+endif
+
+ifndef USE_CURL_DLOPEN
+  ifeq ($(PLATFORM),mingw32)
+    USE_CURL_DLOPEN=0
+  else
+    USE_CURL_DLOPEN=1
+  endif
+endif
+
 ifndef USE_CODEC_VORBIS
 USE_CODEC_VORBIS=0
 endif
@@ -151,7 +163,7 @@ endif
 #############################################################################
 
 ## Defaults
-VM_PPC=
+VM_PPC=vm_ppc_new
 
 LIB=lib
 
@@ -184,6 +196,13 @@ ifeq ($(PLATFORM),linux)
     BASE_CFLAGS += -DUSE_OPENAL=1
     ifeq ($(USE_OPENAL_DLOPEN),1)
       BASE_CFLAGS += -DUSE_OPENAL_DLOPEN=1
+    endif
+  endif
+  
+  ifeq ($(USE_CURL),1)
+    BASE_CFLAGS += -DUSE_CURL=1
+    ifeq ($(USE_CURL_DLOPEN),1)
+      BASE_CFLAGS += -DUSE_CURL_DLOPEN=1
     endif
   endif
 
@@ -248,6 +267,12 @@ ifeq ($(PLATFORM),linux)
       CLIENT_LDFLAGS += -lopenal
     endif
   endif
+  
+  ifeq ($(USE_CURL),1)
+    ifneq ($(USE_CURL_DLOPEN),1)
+      CLIENT_LDFLAGS += -lcurl
+    endif
+  endif
 
   ifeq ($(USE_CODEC_VORBIS),1)
     CLIENT_LDFLAGS += -lvorbisfile -lvorbis -logg
@@ -266,12 +291,68 @@ else # ifeq Linux
 #############################################################################
 
 ifeq ($(PLATFORM),darwin)
-  CC=gcc
+  HAVE_VM_COMPILED=true
+  BASE_CFLAGS=
+  CLIENT_LDFLAGS=
+  LDFLAGS=
+  OPTIMIZE=
+  ifeq ($(BUILD_MACOSX_UB),ppc)
+    CC = gcc-3.3
+    BASE_CFLAGS += -arch ppc -DSMP \
+      -DMAC_OS_X_VERSION_MIN_REQUIRED=1020 -nostdinc \
+      -F/Developer/SDKs/MacOSX10.2.8.sdk/System/Library/Frameworks \
+      -I/Developer/SDKs/MacOSX10.2.8.sdk/usr/include/gcc/darwin/3.3 \
+      -isystem /Developer/SDKs/MacOSX10.2.8.sdk/usr/include
+    LDFLAGS += -arch ppc \
+      -L/Developer/SDKs/MacOSX10.2.8.sdk/usr/lib/gcc/darwin/3.3 \
+      -F/Developer/SDKs/MacOSX10.2.8.sdk/System/Library/Frameworks \
+      -Wl,-syslibroot,/Developer/SDKs/MacOSX10.2.8.sdk,-m 
+    ARCH=ppc
+    # OS X 10.2 sdk lacks dlopen() so tremded would need libSDL anyway...
+    BUILD_SERVER=0
+    USE_OPENAL_DLOPEN=1
+    USE_LOCAL_HEADERS=1
+  else
+  ifeq ($(BUILD_MACOSX_UB),x86)
+    CC=gcc-4.0
+    BASE_CFLAGS += -arch i386 -DSMP -isysroot /Developer/SDKs/MacOSX10.4u.sdk \
+      -mmacosx-version-min=10.4 \
+      -DMAC_OS_X_VERSION_MIN_REQUIRED=1040 -nostdinc \
+      -F/Developer/SDKs/MacOSX10.4u.sdk/System/Library/Frameworks \
+      -I/Developer/SDKs/MacOSX10.4u.sdk/usr/lib/gcc/i686-apple-darwin8/4.0.1/include \
+      -isystem /Developer/SDKs/MacOSX10.4u.sdk/usr/include
+    LDFLAGS = -mmacosx-version-min=10.4 \
+      -L/Developer/SDKs/MacOSX10.4u.sdk/usr/lib/gcc/i686-apple-darwin8/4.0.1
+    ARCH=x86
+    CLIENT_LDFLAGS += -framework OpenAL
+    BUILD_SERVER=0
+  else
+    CC=gcc
+    # -framework OpenAL requires 10.4 or later...for builds shipping to the
+    #  public, you'll want to use USE_OPENAL_DLOPEN and ship your own OpenAL
+    #  library (http://openal.org/ or http://icculus.org/al_osx/)
+    ifeq ($(USE_OPENAL),1)
+      ifneq ($(USE_OPENAL_DLOPEN),1)
+        CLIENT_LDFLAGS += -framework OpenAL 
+      endif
+    endif
+  endif
+  endif
 
-  # !!! FIXME: calling conventions are still broken! See Bugzilla #2519
-  #VM_PPC=vm_ppc_new
+  ifeq ($(ARCH),ppc)
+    OPTIMIZE += -O3 -faltivec
+    # Carbon is required on PPC only to make a call to MakeDataExecutable
+    # in the PPC vm (should be a better non-Carbon way).
+    LDFLAGS += -framework Carbon
+  endif
+  ifeq ($(ARCH),x86)
+    OPTIMIZE += -march=prescott -mfpmath=sse
+    # x86 vm will crash without this since MMX instructions will be used
+    # on OS X no matter what and they corrupt the frame pointer in VM calls
+    BASE_CFLAGS += -mstackrealign
+  endif
 
-  BASE_CFLAGS = -Wall -fno-strict-aliasing -Wimplicit -Wstrict-prototypes
+  BASE_CFLAGS += -Wall -fno-strict-aliasing -Wimplicit -Wstrict-prototypes
   BASE_CFLAGS += -DMACOS_X -fno-common -pipe
 
   # Always include debug symbols...you can strip the binary later...
@@ -280,7 +361,16 @@ ifeq ($(PLATFORM),darwin)
   ifeq ($(USE_OPENAL),1)
     BASE_CFLAGS += -DUSE_OPENAL=1
     ifeq ($(USE_OPENAL_DLOPEN),1)
-      BASE_CFLAGS += -DUSE_OPENAL_DLOPEN=1
+      BASE_CFLAGS += -DUSE_OPENAL_DLOPEN=1 
+    endif
+  endif
+  
+  ifeq ($(USE_CURL),1)
+    BASE_CFLAGS += -DUSE_CURL=1
+    ifeq ($(USE_CURL_DLOPEN),1)
+      BASE_CFLAGS += -DUSE_CURL_DLOPEN=1 
+    else
+      CLIENT_LDFLAGS += -lcurl
     endif
   endif
 
@@ -293,18 +383,7 @@ ifeq ($(PLATFORM),darwin)
     GL_CFLAGS =
   endif
 
-  OPTIMIZE = -O3 -ffast-math -falign-loops=16
-
-  ifeq ($(ARCH),ppc)
-  BASE_CFLAGS += -faltivec
-    ifneq ($(VM_PPC),)
-      HAVE_VM_COMPILED=true
-    endif
-  endif
-
-  ifeq ($(ARCH),x86)
-    # !!! FIXME: x86-specific flags here...
-  endif
+  OPTIMIZE += -ffast-math -falign-loops=16
 
   ifneq ($(HAVE_VM_COMPILED),true)
     BASE_CFLAGS += -DNO_VM_COMPILED
@@ -322,26 +401,16 @@ ifeq ($(PLATFORM),darwin)
 
   #THREAD_LDFLAGS=-lpthread
   #LDFLAGS=-ldl -lm
-  LDFLAGS += -framework Carbon
 
   ifeq ($(USE_SDL),1)
     # We copy sdlmain before ranlib'ing it so that subversion doesn't think
     #  the file has been modified by each build.
     LIBSDLMAIN=$(B)/libSDLmain.a
     LIBSDLMAINSRC=$(LIBSDIR)/macosx/libSDLmain.a
-    CLIENT_LDFLAGS=-framework Cocoa -framework OpenGL $(LIBSDIR)/macosx/libSDL-1.2.0.dylib
+    CLIENT_LDFLAGS += -framework Cocoa -framework OpenGL $(LIBSDIR)/macosx/libSDL-1.2.0.dylib
   else
     # !!! FIXME: frameworks: OpenGL, Carbon, etc...
-    #CLIENT_LDFLAGS=-L/usr/X11R6/$(LIB) -lX11 -lXext -lXxf86dga -lXxf86vm
-  endif
-
-  # -framework OpenAL requires 10.4 or later...for builds shipping to the
-  #  public, you'll want to use USE_OPENAL_DLOPEN and ship your own OpenAL
-  #  library (http://openal.org/ or http://icculus.org/al_osx/)
-  ifeq ($(USE_OPENAL),1)
-    ifneq ($(USE_OPENAL_DLOPEN),1)
-      CLIENT_LDFLAGS += -framework OpenAL
-    endif
+    #CLIENT_LDFLAGS += -L/usr/X11R6/$(LIB) -lX11 -lXext -lXxf86dga -lXxf86vm
   endif
 
   ifeq ($(USE_CODEC_VORBIS),1)
@@ -367,6 +436,15 @@ ifeq ($(PLATFORM),mingw32)
   ifeq ($(USE_OPENAL),1)
     BASE_CFLAGS += -DUSE_OPENAL=1 -DUSE_OPENAL_DLOPEN=1
   endif
+  
+  ifeq ($(USE_CURL),1)
+    BASE_CFLAGS += -DUSE_CURL=1
+    ifeq ($(USE_CURL_DLOPEN),1)
+      BASE_CFLAGS += -DUSE_CURL_DLOPEN=1
+    else
+      BASE_CFLAGS += -DCURL_STATICLIB
+    endif
+  endif
 
   ifeq ($(USE_CODEC_VORBIS),1)
     BASE_CFLAGS += -DUSE_CODEC_VORBIS=1
@@ -388,8 +466,14 @@ ifeq ($(PLATFORM),mingw32)
 
   BINEXT=.exe
 
-  LDFLAGS= -mwindows -lwsock32 -lgdi32 -lwinmm -lole32
+  LDFLAGS= -mwindows -lshfolder -lwsock32 -lgdi32 -lwinmm -lole32
   CLIENT_LDFLAGS=
+
+  ifeq ($(USE_CURL),1)
+    ifneq ($(USE_CURL_DLOPEN),1)
+      CLIENT_LDFLAGS += -L$(LIBSDIR)/win32 -lcurl
+    endif
+  endif
 
   ifeq ($(USE_CODEC_VORBIS),1)
     CLIENT_LDFLAGS += -lvorbisfile -lvorbis -logg
@@ -429,6 +513,15 @@ ifeq ($(PLATFORM),freebsd)
     BASE_CFLAGS += -DUSE_OPENAL=1
     ifeq ($(USE_OPENAL_DLOPEN),1)
       BASE_CFLAGS += -DUSE_OPENAL_DLOPEN=1
+    endif
+  endif
+  
+  ifeq ($(USE_CURL),1)
+    BASE_CFLAGS += -DUSE_CURL=1
+    ifneq ($(USE_CURL_DLOPEN),1)
+      CLIENT_LDFLAGS += -lcurl
+    else
+      BASE_CFLAGS += -DUSE_CURL_DLOPEN=1
     endif
   endif
 
@@ -481,6 +574,13 @@ ifeq ($(PLATFORM),freebsd)
 
   ifeq ($(USE_CODEC_VORBIS),1)
     CLIENT_LDFLAGS += -lvorbisfile -lvorbis -logg
+  endif
+  
+  ifeq ($(USE_CURL),1)
+    BASE_CFLAGS += -DUSE_CURL=1
+    ifneq ($(USE_CURL_DLOPEN),1)
+      BASE_CFLAGS += -DCURL_STATICLIB
+    endif
   endif
 
 
@@ -778,6 +878,7 @@ Q3OBJ = \
   $(B)/client/cvar.o \
   $(B)/client/files.o \
   $(B)/client/md4.o \
+  $(B)/client/md5.o \
   $(B)/client/msg.o \
   $(B)/client/net_chan.o \
   $(B)/client/huffman.o \
@@ -795,6 +896,8 @@ Q3OBJ = \
   \
   $(B)/client/qal.o \
   $(B)/client/snd_openal.o \
+  \
+  $(B)/client/cl_curl.o \
   \
   $(B)/client/sv_bot.o \
   $(B)/client/sv_ccmds.o \
@@ -909,6 +1012,14 @@ ifeq ($(ARCH),x86)
     $(B)/client/ftola.o \
     $(B)/client/snapvectora.o
 endif
+ifeq ($(ARCH),i386)
+  Q3OBJ += $(B)/client/vm_x86.o
+  Q3OBJ += \
+    $(B)/client/snd_mixa.o \
+    $(B)/client/matha.o \
+    $(B)/client/ftola.o \
+    $(B)/client/snapvectora.o
+endif
 
 ifeq ($(ARCH),x86_64)
   Q3OBJ += $(B)/client/vm_x86_64.o
@@ -1002,6 +1113,8 @@ $(B)/client/snd_codec_ogg.o : $(CDIR)/snd_codec_ogg.c; $(DO_CC)
 $(B)/client/qal.o : $(CDIR)/qal.c; $(DO_CC)
 $(B)/client/snd_openal.o : $(CDIR)/snd_openal.c; $(DO_CC)
 
+$(B)/client/cl_curl.o : $(CDIR)/cl_curl.c; $(DO_CC)
+
 $(B)/client/sv_bot.o : $(SDIR)/sv_bot.c; $(DO_CC)
 $(B)/client/sv_client.o : $(SDIR)/sv_client.c; $(DO_CC)
 $(B)/client/sv_ccmds.o : $(SDIR)/sv_ccmds.c; $(DO_CC)
@@ -1021,6 +1134,7 @@ $(B)/client/common.o : $(CMDIR)/common.c; $(DO_CC)
 $(B)/client/cvar.o : $(CMDIR)/cvar.c; $(DO_CC)
 $(B)/client/files.o : $(CMDIR)/files.c; $(DO_CC)
 $(B)/client/md4.o : $(CMDIR)/md4.c; $(DO_CC)
+$(B)/client/md5.o : $(CMDIR)/md5.c; $(DO_CC)
 $(B)/client/msg.o : $(CMDIR)/msg.c; $(DO_CC)
 $(B)/client/net_chan.o : $(CMDIR)/net_chan.c; $(DO_CC)
 $(B)/client/huffman.o : $(CMDIR)/huffman.c; $(DO_CC)
@@ -1239,6 +1353,11 @@ Q3DOBJ = \
   $(B)/ded/null_snddma.o
 
 ifeq ($(ARCH),x86)
+  Q3DOBJ += $(B)/ded/vm_x86.o $(B)/ded/ftola.o \
+      $(B)/ded/snapvectora.o $(B)/ded/matha.o
+endif
+
+ifeq ($(ARCH),i386)
   Q3DOBJ += $(B)/ded/vm_x86.o $(B)/ded/ftola.o \
       $(B)/ded/snapvectora.o $(B)/ded/matha.o
 endif

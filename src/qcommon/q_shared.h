@@ -627,7 +627,7 @@ vec_t DistanceBetweenLineSegments(
 float Com_Clamp( float min, float max, float value );
 
 char	*COM_SkipPath( char *pathname );
-void	COM_StripExtension( const char *in, char *out );
+void	COM_StripExtension(const char *in, char *out, int destsize);
 void	COM_DefaultExtension( char *path, int maxSize, const char *extension );
 
 void	COM_BeginParseSession( const char *name );
@@ -674,6 +674,8 @@ void	QDECL Com_sprintf (char *dest, int size, const char *fmt, ...);
 
 char *Com_SkipTokens( char *s, int numTokens, char *sep );
 char *Com_SkipCharset( char *s, char *sep );
+
+void Com_RandomBytes( byte *string, int len );
 
 // mode parm for FS_FOpenFile
 typedef enum {

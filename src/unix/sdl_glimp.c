@@ -68,7 +68,12 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#if USE_SDL_VIDEO
+#include "SDL.h"
+#include "SDL_loadso.h"
+#else
 #include <dlfcn.h>
+#endif
 
 #include "../renderer/tr_local.h"
 #include "../client/client.h"
@@ -266,7 +271,14 @@ static const char *XLateKey(SDL_keysym *keysym, int *key)
     //else if (ch >= 'A' && ch <= 'Z')
     //  ch = ch - 'A' + 'a';
 
-    buf[0] = ch;
+    // tjw: translate K_BACKSPACE to ctrl-h for MACOS_X (others?)
+    if (ch == K_BACKSPACE)
+    {
+      *key = 'h' - 'a' + 1;
+      buf[0] = *key;
+    }
+    else
+      buf[0] = ch;
   }
 
   return buf;

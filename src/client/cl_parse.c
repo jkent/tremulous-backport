@@ -256,6 +256,13 @@ void CL_ParseSnapshot( msg_t *msg ) {
 
 	// read areamask
 	len = MSG_ReadByte( msg );
+	
+	if(len > sizeof(newSnap.areamask))
+	{
+		Com_Error (ERR_DROP,"CL_ParseSnapshot: Invalid size %d for areamask.", len);
+		return;
+	}
+	
 	MSG_ReadData( msg, &newSnap.areamask, len);
 
 	// read playerinfo
@@ -339,6 +346,13 @@ void CL_SystemInfoChanged( void ) {
 	// in some cases, outdated cp commands might get sent with this news serverId
 	cl.serverId = atoi( Info_ValueForKey( systemInfo, "sv_serverid" ) );
 
+#ifdef USE_CURL
+	clc.wwwDownload = atoi(Info_ValueForKey(systemInfo, "sv_wwwDownload"));
+	Q_strncpyz(clc.wwwBaseURL,
+		Info_ValueForKey(systemInfo, "sv_wwwBaseURL"),
+		sizeof(clc.wwwBaseURL));
+#endif /* USE_CURL */
+
 	// don't set any vars when playing a demo
 	if ( clc.demoplaying ) {
 		return;
@@ -366,6 +380,10 @@ void CL_SystemInfoChanged( void ) {
 		if ( !key[0] ) {
 			break;
 		}
+		if(!Q_stricmp(key, "sv_wwwDownload")
+			|| !Q_stricmp(key, "sv_wwwBaseURL"))
+			continue;
+
 		// ehw!
 		if ( !Q_stricmp( key, "fs_game" ) ) {
 			gameSet = qtrue;
@@ -476,6 +494,12 @@ void CL_ParseDownload ( msg_t *msg ) {
 	unsigned char data[MAX_MSGLEN];
 	int block;
 
+	if (!*clc.downloadTempName) {
+		Com_Printf("Server sending download, but no download was requested\n");
+		CL_AddReliableCommand( "stopdl" );
+		return;
+	}
+
 	// read the data
 	block = MSG_ReadShort ( msg );
 
@@ -494,8 +518,13 @@ void CL_ParseDownload ( msg_t *msg ) {
 	}
 
 	size = MSG_ReadShort ( msg );
-	if (size > 0)
-		MSG_ReadData( msg, data, size );
+	if (size < 0 || size > sizeof(data))
+	{
+		Com_Error(ERR_DROP, "CL_ParseDownload: Invalid size %d for download chunk.", size);
+		return;
+	}
+	
+	MSG_ReadData(msg, data, size);
 
 	if (clc.downloadBlock != block) {
 		Com_DPrintf( "CL_ParseDownload: Expected block %d, got %d\n", clc.downloadBlock, block);
@@ -505,12 +534,6 @@ void CL_ParseDownload ( msg_t *msg ) {
 	// open the file if not opened yet
 	if (!clc.download)
 	{
-		if (!*clc.downloadTempName) {
-			Com_Printf("Server sending download, but no download was requested\n");
-			CL_AddReliableCommand( "stopdl" );
-			return;
-		}
-
 		clc.download = FS_SV_FOpenFileWrite( clc.downloadTempName );
 
 		if (!clc.download) {

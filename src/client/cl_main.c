@@ -67,11 +67,15 @@ cvar_t	*cl_activeAction;
 cvar_t	*cl_motdString;
 
 cvar_t	*cl_allowDownload;
+cvar_t	*cl_wwwDownload;
+cvar_t	*cl_cURLLib;
 cvar_t	*cl_conXOffset;
 cvar_t	*cl_inGameVideo;
 
 cvar_t	*cl_serverStatusResendTime;
 cvar_t	*cl_trn;
+
+cvar_t	*cl_guidServerUniq;
 
 clientActive_t		cl;
 clientConnection_t	clc;
@@ -759,6 +763,28 @@ void CL_ClearState (void) {
 	Com_Memset( &cl, 0, sizeof( cl ) );
 }
 
+/*
+====================
+CL_UpdateGUID
+
+update cl_guid using QKEY_FILE and optional prefix
+====================
+*/
+static void CL_UpdateGUID( char *prefix, int prefix_len )
+{
+	fileHandle_t f;
+	int len;
+
+	len = FS_SV_FOpenFileRead( QKEY_FILE, &f );
+	FS_FCloseFile( f );
+
+	if( len != QKEY_SIZE ) 
+		Cvar_Set( "cl_guid", "" );
+	else
+		Cvar_Set( "cl_guid", Com_MD5File( QKEY_FILE, QKEY_SIZE,
+			prefix, prefix_len ) );
+}
+
 
 /*
 =====================
@@ -827,6 +853,7 @@ void CL_Disconnect( qboolean showMainMenu ) {
 	if( CL_VideoRecording( ) ) {
 		CL_CloseAVI( );
 	}
+	CL_UpdateGUID( NULL, 0 );
 }
 
 
@@ -997,6 +1024,7 @@ CL_Connect_f
 */
 void CL_Connect_f( void ) {
 	char	*server;
+	char	serverString[ 22 ];
 
 	if ( Cmd_Argc() != 2 ) {
 		Com_Printf( "usage: connect [server]\n");
@@ -1039,10 +1067,17 @@ void CL_Connect_f( void ) {
 	if (clc.serverAddress.port == 0) {
 		clc.serverAddress.port = BigShort( PORT_SERVER );
 	}
-	Com_Printf( "%s resolved to %i.%i.%i.%i:%i\n", cls.servername,
-		clc.serverAddress.ip[0], clc.serverAddress.ip[1],
-		clc.serverAddress.ip[2], clc.serverAddress.ip[3],
-		BigShort( clc.serverAddress.port ) );
+	Com_sprintf( serverString, sizeof( serverString ), "%i.%i.%i.%i:%i",
+                clc.serverAddress.ip[0], clc.serverAddress.ip[1],
+                clc.serverAddress.ip[2], clc.serverAddress.ip[3],
+                BigShort( clc.serverAddress.port ) );
+ 
+	Com_Printf( "%s resolved to %s\n", cls.servername, serverString );
+
+	if( cl_guidServerUniq->integer )
+		CL_UpdateGUID( serverString, strlen( serverString ) );
+	else
+		CL_UpdateGUID( NULL, 0 );
 
 	// if we aren't playing on a lan, we need to authenticate
 	// with the cd key
@@ -1379,9 +1414,11 @@ CL_NextDownload
 A download completed or failed
 =================
 */
-void CL_NextDownload(void) {
+void CL_NextDownload() {
 	char *s;
 	char *remoteName, *localName;
+	char url[MAX_STRING_CHARS] = {""};
+	qboolean useCURL = qfalse;
 
 	// We are looking to start a download here
 	if (*clc.downloadList) {
@@ -1405,9 +1442,32 @@ void CL_NextDownload(void) {
 			*s++ = 0;
 		else
 			s = localName + strlen(localName); // point at the nul byte
-
-		CL_BeginDownload( localName, remoteName );
-
+#ifdef USE_CURL
+               if( cl_wwwDownload->integer ) {
+                       if(!clc.wwwDownload)
+                               Com_Printf("cl_wwwDownload: server does not "
+                                       "allow download redirection\n");
+                       else if(!*clc.wwwBaseURL)
+                               Com_Printf("cl_wwwDownload: server does not "
+                                       "have sv_wwwBaseURL set\n");
+                       else if(!CL_cURL_Init()) {
+                               Com_Printf("cl_wwwDownload: could not load "
+                                       "cURL library\n");
+                       }
+                       else {
+                               Q_strncpyz(url, clc.wwwBaseURL, sizeof(url));
+                               Q_strcat(url, sizeof(url), "/");
+                               Q_strcat(url, sizeof(url), remoteName);
+                               Com_Printf("Download URL: %s\n", url);
+                               CL_cURL_BeginDownload(localName, url);
+                               useCURL = qtrue;
+                       }
+               }
+#endif /* USE_CURL */
+               if(!useCURL) {
+                       CL_BeginDownload( localName, remoteName );
+                       Com_Printf("CL_NextDownload: UDP download\n");
+               }
 		clc.downloadRestart = qtrue;
 
 		// move over the rest
@@ -1966,6 +2026,11 @@ void CL_Frame ( int msec ) {
 		return;
 	}
 
+#ifdef USE_CURL
+	if(clc.downloadCURLM)
+		CL_cURL_PerformDownload();
+#endif
+
 	if ( cls.state == CA_DISCONNECTED && !( cls.keyCatchers & KEYCATCH_UI )
 		&& !com_sv_running->integer ) {
 		// if disconnected, bring up the menu
@@ -2014,7 +2079,7 @@ void CL_Frame ( int msec ) {
 			}
 
 			Q_strncpyz( mapName, COM_SkipPath( cl.mapname ), sizeof( cl.mapname ) );
-			COM_StripExtension( mapName, mapName );
+			COM_StripExtension(mapName, mapName, sizeof(mapName));
 
 			Cbuf_ExecuteText( EXEC_NOW,
 					va( "record %s-%s-%s", nowString, serverName, mapName ) );
@@ -2327,6 +2392,47 @@ void CL_StopVideo_f( void )
 }
 
 /*
+===============
+CL_GenerateQKey
+
+test to see if a valid QKEY_FILE exists.  If one does not, try to generate
+it by filling it with 2048 bytes of random data.
+===============
+*/
+static void CL_GenerateQKey(void)
+{
+	int len = 0;
+	unsigned char buff[ QKEY_SIZE ];
+	fileHandle_t f;
+
+	len = FS_SV_FOpenFileRead( QKEY_FILE, &f );
+	FS_FCloseFile( f );
+	if( len == QKEY_SIZE ) {
+		Com_Printf( "QKEY found.\n" );
+		return;
+	}
+	else {
+		if( len > 0 ) {
+			Com_Printf( "QKEY file size != %d, regenerating\n",
+				QKEY_SIZE );
+		}
+
+		Com_Printf( "QKEY building random string\n" );
+		Com_RandomBytes( buff, sizeof(buff) );
+
+		f = FS_SV_FOpenFileWrite( QKEY_FILE );
+		if( !f ) {
+			Com_Printf( "QKEY could not open %s for write\n",
+				QKEY_FILE );
+			return;
+		}
+		FS_Write( buff, sizeof(buff), f );
+		FS_FCloseFile( f );
+		Com_Printf( "QKEY generated\n" );
+	}
+} 
+
+/*
 ====================
 CL_Init
 ====================
@@ -2385,6 +2491,17 @@ void CL_Init( void ) {
 
 	cl_allowDownload = Cvar_Get ("cl_allowDownload", "0", CVAR_ARCHIVE);
 
+#ifdef USE_CURL
+	cl_wwwDownload = Cvar_Get ("cl_wwwDownload", "1",
+		CVAR_USERINFO | CVAR_ARCHIVE);
+#else
+	// don't lose our archived value in config file when using a
+	// non-curl binary, but don't put it in USERINFO either
+	cl_wwwDownload = Cvar_Get ("cl_wwwDownload", "1", CVAR_ARCHIVE);
+#endif /* USE_CURL */
+
+	cl_cURLLib = Cvar_Get ("cl_cURLLib", DEFAULT_CURL_LIB, CVAR_ARCHIVE);
+
 	cl_conXOffset = Cvar_Get ("cl_conXOffset", "0", 0);
 #ifdef MACOS_X
         // In game video is REALLY slow in Mac OS X right now due to driver slowness
@@ -2415,9 +2532,11 @@ void CL_Init( void ) {
 	Cvar_Get( "cl_maxPing", "800", CVAR_ARCHIVE );
 
 
+	cl_guidServerUniq = Cvar_Get ("cl_guidServerUniq", "0", CVAR_ARCHIVE);
+
 	// userinfo
 	Cvar_Get ("name", "UnnamedPlayer", CVAR_USERINFO | CVAR_ARCHIVE );
-	Cvar_Get ("rate", "3000", CVAR_USERINFO | CVAR_ARCHIVE );
+	Cvar_Get ("rate", "25000", CVAR_USERINFO | CVAR_ARCHIVE );
 	Cvar_Get ("snaps", "20", CVAR_USERINFO | CVAR_ARCHIVE );
 	Cvar_Get ("model", "sarge", CVAR_USERINFO | CVAR_ARCHIVE );
 	Cvar_Get ("headmodel", "sarge", CVAR_USERINFO | CVAR_ARCHIVE );
@@ -2473,6 +2592,10 @@ void CL_Init( void ) {
 	Cbuf_Execute ();
 
 	Cvar_Set( "cl_running", "1" );
+
+	CL_GenerateQKey();	
+	Cvar_Get( "cl_guid", "", CVAR_USERINFO | CVAR_ROM );
+	CL_UpdateGUID( NULL, 0 );
 
 	Com_Printf( "----- Client Initialization Complete -----\n" );
 }

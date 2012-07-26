@@ -722,6 +722,7 @@ void 		Com_Quit_f( void );
 int			Com_EventLoop( void );
 int			Com_Milliseconds( void );	// will be journaled properly
 unsigned	Com_BlockChecksum( const void *buffer, int length );
+char		*Com_MD5File(const char *filename, int length, const char *prefix, int prefix_len);
 int			Com_HashKey(char *string, int maxlen);
 int			Com_Filter(char *filter, char *name, int casesensitive);
 int			Com_FilterPath(char *filter, char *name, int casesensitive);
@@ -985,6 +986,8 @@ void	Sys_Print( const char *msg );
 int		Sys_Milliseconds (void);
 
 void	Sys_SnapVector( float *v );
+
+qboolean Sys_RandomBytes( byte *string, int len );
 
 // the system console is shown when a dedicated server is running
 void	Sys_DisplaySystemConsole( qboolean show );

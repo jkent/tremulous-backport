@@ -141,6 +141,9 @@ void GLimp_SetGamma( unsigned char red[256], unsigned char green[256], unsigned 
 		return;
 	}
 
+	if (!g_wv.activeApp)
+		return;
+
 //mapGammaMax();
 
 	for ( i = 0; i < 256; i++ ) {

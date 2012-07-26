@@ -26,6 +26,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../qcommon/qcommon.h"
 
 #include <unistd.h>
+#if MAC_OS_X_VERSION_MIN_REQUIRED == 1020
+  // needed for socket_t on OSX 10.2
+  #define _BSD_SOCKLEN_T_
+#endif
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <netinet/in.h>
@@ -354,9 +358,17 @@ NET_GetLocalAddress
 // Don't do a forward mapping from the hostname of the machine to the IP.  The reason is that we might have obtained an IP address from DHCP and there might not be any name registered for the machine.  On Mac OS X, the machine name defaults to 'localhost' and NetInfo has 127.0.0.1 listed for this name.  Instead, we want to get a list of all the IP network interfaces on the machine.
 // This code adapted from OmniNetworking.
 
-#define IFR_NEXT(ifr)	\
-    ((struct ifreq *) ((char *) (ifr) + sizeof(*(ifr)) + \
-      MAX(0, (int) (ifr)->ifr_addr.sa_len - (int) sizeof((ifr)->ifr_addr))))
+
+#ifdef _SIZEOF_ADDR_IFREQ
+	// tjw: OSX 10.4 does not have sa_len
+	#define IFR_NEXT(ifr)	\
+	((struct ifreq *) ((char *) ifr + _SIZEOF_ADDR_IFREQ(*ifr)))
+#else
+	// tjw: assume that once upon a time some version did have sa_len
+	#define IFR_NEXT(ifr)	\
+	((struct ifreq *) ((char *) (ifr) + sizeof(*(ifr)) + \
+	MAX(0, (int) (ifr)->ifr_addr.sa_len - (int) sizeof((ifr)->ifr_addr))))
+#endif
 
 void NET_GetLocalAddress( void ) {
         struct ifreq requestBuffer[MAX_IPS], *linkInterface, *inetInterface;
@@ -366,7 +378,7 @@ void NET_GetLocalAddress( void ) {
         int interfaceSocket;
         int family;
         
-        //Com_Printf("NET_GetLocalAddress: Querying for network interfaces\n");
+        Com_Printf("NET_GetLocalAddress: Querying for network interfaces\n");
         
         // Set this early so we can just return if there is an error
 	numIP = 0;
@@ -438,6 +450,7 @@ void NET_GetLocalAddress( void ) {
             }
             linkInterface = IFR_NEXT(linkInterface);
         }
+        Com_Printf("NET_GetLocalAddress: DONE querying for network interfaces\n");
 
         close(interfaceSocket);
 }

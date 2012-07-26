@@ -33,6 +33,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include <direct.h>
 #include <io.h>
 #include <conio.h>
+#include <wincrypt.h>
 
 /*
 ================
@@ -81,6 +82,24 @@ void Sys_SnapVector( float *v )
 	*v = i;
 }
 #endif
+
+qboolean Sys_RandomBytes( byte *string, int len )
+{
+	HCRYPTPROV  prov;
+
+	if( !CryptAcquireContext( &prov, NULL, NULL,
+		PROV_RSA_FULL, CRYPT_VERIFYCONTEXT ) )  {
+
+		return qfalse;
+	}
+
+	if( !CryptGenRandom( prov, len, (BYTE *)string ) )  {
+		CryptReleaseContext( prov, 0 );
+		return qfalse;
+	}
+	CryptReleaseContext( prov, 0 );
+	return qtrue;
+}
 
 
 /*
@@ -286,7 +305,26 @@ char *Sys_GetCurrentUser( void )
 }
 
 char	*Sys_DefaultHomePath(void) {
-	return NULL;
+	TCHAR szPath[MAX_PATH];
+	static char path[MAX_OSPATH];
+
+	if( !SUCCEEDED( SHGetFolderPath( NULL, CSIDL_LOCAL_APPDATA,
+		NULL, 0, szPath ) ) )
+	{
+
+		return NULL;
+	}
+	Q_strncpyz( path, szPath, sizeof(path) );
+	Q_strcat( path, sizeof(path), "\\Tremulous" );
+	if( !CreateDirectory( path, NULL ) )
+	{
+		if( GetLastError() != ERROR_ALREADY_EXISTS )
+		{
+			Com_Printf("Unable to create directory \"%s\"\n", path);
+			return NULL;
+		}
+	}
+	return path;
 }
 
 char *Sys_DefaultInstallPath(void)

@@ -466,7 +466,11 @@ typedef struct src_s
 	qboolean				local;			// Is this local (relative to the cam)
 } src_t;
 
-#define MAX_SRC 128
+#ifdef MACOS_X
+  #define MAX_SRC 64
+#else
+  #define MAX_SRC 128
+#endif
 static src_t srcList[MAX_SRC];
 static int srcCount = 0;
 static qboolean alSourcesInitialised = qfalse;
@@ -861,8 +865,6 @@ void S_AL_StartSound( vec3_t origin, int entnum, int entchannel, sfxHandle_t sfx
 	// Set up the effect
 	if( origin == NULL )
 	{
-		srcList[ src ].isTracking = qtrue;
-
 		if( S_AL_HearingThroughEntity( entnum ) )
 		{
 			// Where the entity is the local player, play a local sound
@@ -874,6 +876,7 @@ void S_AL_StartSound( vec3_t origin, int entnum, int entchannel, sfxHandle_t sfx
 			S_AL_SrcSetup( src, sfx, SRCPRI_ONESHOT, entnum, entchannel, qfalse );
 			VectorCopy( entityList[ entnum ].origin, sorigin );
 		}
+		srcList[ src ].isTracking = qtrue;
 	}
 	else
 	{
@@ -1370,6 +1373,9 @@ void S_AL_MusicProcess(ALuint b)
 	int l;
 	ALuint format;
 
+	if(!mus_stream)
+		return;
+
 	l = S_CodecReadStream(mus_stream, MUSIC_BUFFER_SIZE, decode_buffer);
 
 	// Run out data to read, start at the beginning again
@@ -1401,8 +1407,10 @@ void S_AL_MusicProcess(ALuint b)
 	if( ( error = qalGetError( ) ) != AL_NO_ERROR )
 	{
 		S_AL_StopBackgroundTrack( );
-		Com_Printf( S_COLOR_RED "ERROR: while buffering data for music stream - %s\n",
-				S_AL_ErrorMsg( error ) );
+		Com_Printf( S_COLOR_RED
+			"ERROR: while buffering data for music stream."
+			" buffer: %d size: %d format: %d error: %s\n",
+			b, l, format, S_AL_ErrorMsg( error ) );
 		return;
 	}
 }
@@ -1444,6 +1452,13 @@ void S_AL_StartBackgroundTrack( const char *intro, const char *loop )
 	if(musicSourceHandle == -1)
 		return;
 
+	mus_stream = S_CodecOpenStream(s_backgroundLoop);
+	if(!mus_stream)
+	{
+		S_AL_MusicSourceFree();
+		return;
+	}
+
 	// Generate the musicBuffers
 	qalGenBuffers(NUM_MUSIC_BUFFERS, musicBuffers);
 	
@@ -1451,19 +1466,6 @@ void S_AL_StartBackgroundTrack( const char *intro, const char *loop )
 	for(i = 0; i < NUM_MUSIC_BUFFERS; i++)
 	{
 		S_AL_MusicProcess(musicBuffers[i]);
-
-		// check whether our stream still exists.
-		if(!mus_stream)
-		{
-			// there was an error in reading which resulted in a
-			// closed stream. We must bail out or we'll crash.
-
-			// deallocate everything we allocated so far:
-			qalDeleteBuffers(NUM_MUSIC_BUFFERS, musicBuffers);
-			S_AL_MusicSourceFree();
-
-			return;
-		}
 	}
 
 	qalSourceQueueBuffers(musicSource, NUM_MUSIC_BUFFERS, musicBuffers);
@@ -1525,6 +1527,8 @@ static ALCcontext *alContext;
 
 #ifdef _WIN32
 #define ALDRIVER_DEFAULT "OpenAL32.dll"
+#elif defined(MACOS_X)
+#define ALDRIVER_DEFAULT "/System/Library/Frameworks/OpenAL.framework/OpenAL"
 #else
 #define ALDRIVER_DEFAULT "libopenal.so.0"
 #endif
@@ -1539,6 +1543,7 @@ void S_AL_StopAllSounds( void )
 {
 	S_AL_SrcShutup();
 	S_AL_StopBackgroundTrack();
+	S_AL_StreamDie();
 }
 
 /*
