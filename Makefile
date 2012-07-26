@@ -172,7 +172,7 @@ MKDIR=mkdir
 
 ifeq ($(PLATFORM),linux)
 
-  CC=gcc
+  CC?=gcc
 
   ifeq ($(ARCH),alpha)
     ARCH=axp
@@ -777,9 +777,9 @@ ifeq ($(USE_LOCAL_HEADERS),1)
 endif
 
 ifeq ($(GENERATE_DEPENDENCIES),1)
-  ifeq ($(CC),gcc)
+#  ifeq ($(CC),gcc)
     DEPEND_CFLAGS=-MMD
-  endif
+#  endif
 endif
 
 DO_CC=$(CC) $(NOTSHLIBCFLAGS) $(CFLAGS) -o $@ -c $<
