@@ -471,7 +471,7 @@ ifeq ($(PLATFORM),mingw32)
 
   ifeq ($(USE_CURL),1)
     ifneq ($(USE_CURL_DLOPEN),1)
-      CLIENT_LDFLAGS += -L$(LIBSDIR)/win32 -lcurl
+      CLIENT_LDFLAGS += -L$(LIBSDIR)/win32 /usr/local/lib/libcurl.a
     endif
   endif
 

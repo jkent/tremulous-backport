@@ -30,6 +30,10 @@ WinVars_t	g_wv;
 #define WM_MOUSEWHEEL (WM_MOUSELAST+1)  // message that will be supported by the OS 
 #endif
 
+#ifndef SPI_SCREENSAVERRUNNING
+#define SPI_SCREENSAVERRUNNING SPI_SETSCREENSAVERRUNNING
+#endif
+
 static UINT MSH_MOUSEWHEEL;
 
 // Console variables that we need to access from this module
