@@ -2489,7 +2489,7 @@ void CL_Init( void ) {
 
 	cl_showMouseRate = Cvar_Get ("cl_showmouserate", "0", 0);
 
-	cl_allowDownload = Cvar_Get ("cl_allowDownload", "0", CVAR_ARCHIVE);
+	cl_allowDownload = Cvar_Get ("cl_allowDownload", "1", CVAR_ARCHIVE);
 
 #ifdef USE_CURL
 	cl_wwwDownload = Cvar_Get ("cl_wwwDownload", "1",
@@ -2532,7 +2532,7 @@ void CL_Init( void ) {
 	Cvar_Get( "cl_maxPing", "800", CVAR_ARCHIVE );
 
 
-	cl_guidServerUniq = Cvar_Get ("cl_guidServerUniq", "0", CVAR_ARCHIVE);
+	cl_guidServerUniq = Cvar_Get ("cl_guidServerUniq", "1", CVAR_ARCHIVE);
 
 	// userinfo
 	Cvar_Get ("name", "UnnamedPlayer", CVAR_USERINFO | CVAR_ARCHIVE );
